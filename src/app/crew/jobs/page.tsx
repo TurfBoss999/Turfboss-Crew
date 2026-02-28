@@ -102,6 +102,7 @@ export default function CrewJobsPage() {
   const jobCounts = useMemo(() => {
     const today = new Date().toISOString().split('T')[0];
     return {
+      all: jobs.filter(job => job.status !== 'cancelled').length,
       today: jobs.filter(job => 
         job.date === today && job.status !== 'completed' && job.status !== 'cancelled'
       ).length,
