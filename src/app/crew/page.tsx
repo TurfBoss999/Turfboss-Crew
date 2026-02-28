@@ -1,10 +1,9 @@
 import { redirect } from 'next/navigation';
 
 // ================================
-// ROOT PAGE - REDIRECT TO CREW LOGIN
+// CREW INDEX - REDIRECT TO LOGIN
 // ================================
 
-export default function Home() {
+export default function CrewIndexPage() {
   redirect('/crew/login');
 }
-
