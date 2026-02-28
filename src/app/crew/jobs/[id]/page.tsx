@@ -372,9 +372,9 @@ export default function JobDetailPage() {
 
           {/* Google Maps Embed */}
           <div className="h-48 sm:h-64 lg:h-80 relative">
-            {job.lat && job.lng ? (
+            {job.address ? (
               <iframe
-                src={`https://www.google.com/maps/embed/v1/place?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || ''}&q=${job.lat},${job.lng}&zoom=16`}
+                src={`https://www.google.com/maps/embed/v1/place?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || ''}&q=${encodeURIComponent(job.address)}&zoom=16`}
                 width="100%"
                 height="100%"
                 style={{ border: 0 }}
@@ -395,9 +395,9 @@ export default function JobDetailPage() {
               </div>
             )}
             {/* Navigate Button */}
-            {job.lat && job.lng && (
+            {job.address && (
               <a
-                href={`https://maps.google.com/maps?daddr=${job.lat},${job.lng}`}
+                href={`https://maps.google.com/maps?daddr=${encodeURIComponent(job.address)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="absolute bottom-3 right-3 bg-white px-4 py-2.5 rounded-lg shadow-md text-sm font-medium text-emerald-600 flex items-center gap-2 hover:bg-gray-50 transition-colors"
