@@ -113,20 +113,31 @@ export default function JobDetailPage() {
     if (!job) return;
     
     setIsUpdating(true);
-    
+
     try {
+      const now = new Date().toISOString();
+      const updatePayload: Partial<Job> = {
+        status: newStatus,
+        updated_at: now,
+      };
+
+      // Real timestamps are only ever set by the crew's own Start/Complete
+      // actions, not by any status change coming from elsewhere.
+      if (newStatus === 'in_progress') {
+        updatePayload.started_at = now;
+      } else if (newStatus === 'completed') {
+        updatePayload.completed_at = now;
+      }
+
       const { error: updateError } = await supabase
         .from('jobs')
-        .update({ 
-          status: newStatus,
-          updated_at: new Date().toISOString()
-        })
+        .update(updatePayload)
         .eq('id', job.id);
 
       if (updateError) throw updateError;
-      
+
       // Update local state optimistically
-      setJob(prev => prev ? { ...prev, status: newStatus } : null);
+      setJob(prev => prev ? { ...prev, ...updatePayload } : null);
       
       const messages: Record<JobStatus, string> = {
         scheduled: 'Job reset to scheduled',
@@ -157,21 +168,21 @@ export default function JobDetailPage() {
       const timestamp = new Date().toLocaleString();
       const issueLabel = issueTypeLabels[issueType];
       const issueNote = `\n[ISSUE - ${timestamp}]\nType: ${issueLabel}\n${description}`;
-      
-      const newNotes = job.notes ? job.notes + issueNote : issueNote;
-      
+
+      const newFieldNotes = job.field_notes ? job.field_notes + issueNote : issueNote;
+
       const { error: updateError } = await supabase
         .from('jobs')
-        .update({ 
-          notes: newNotes,
+        .update({
+          field_notes: newFieldNotes,
           updated_at: new Date().toISOString()
         })
         .eq('id', job.id);
 
       if (updateError) throw updateError;
-      
+
       // Update local state
-      setJob(prev => prev ? { ...prev, notes: newNotes } : null);
+      setJob(prev => prev ? { ...prev, field_notes: newFieldNotes } : null);
       setIsIssueModalOpen(false);
       showSuccessMessage('Issue reported successfully');
     } catch (err) {
@@ -438,17 +449,32 @@ export default function JobDetailPage() {
           </div>
         </div>
 
-        {/* Notes from Admin */}
-        {job.notes && (
+        {/* Service Notes from Admin */}
+        {job.service_notes && (
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <h3 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
               <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
               </svg>
-              Notes
+              Service Notes
             </h3>
             <div className="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap bg-gray-50 p-3 rounded-lg">
-              {job.notes}
+              {job.service_notes}
+            </div>
+          </div>
+        )}
+
+        {/* Field Notes (your own reported issues & notes on this job) */}
+        {job.field_notes && (
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <h3 className="font-medium text-gray-900 mb-2 flex items-center gap-2">
+              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+              </svg>
+              Field Notes
+            </h3>
+            <div className="text-gray-700 text-sm leading-relaxed whitespace-pre-wrap bg-gray-50 p-3 rounded-lg">
+              {job.field_notes}
             </div>
           </div>
         )}

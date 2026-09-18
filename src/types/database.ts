@@ -26,11 +26,14 @@ export interface Job {
   time_window_start: string | null;
   time_window_end: string | null;
   est_duration_min: number | null;
-  notes: string | null;
+  service_notes: string | null;
+  field_notes: string | null;
   lat: number | null;
   lng: number | null;
   crew_id: string | null;
   status: JobStatus;
+  started_at: string | null;
+  completed_at: string | null;
   completion_photo_url: string | null;
   image_urls: string[] | null;
   created_at: string;
