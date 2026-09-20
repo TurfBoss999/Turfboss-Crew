@@ -6,7 +6,7 @@
 // ================================
 
 import Link from 'next/link';
-import { Job } from '@/types/database';
+import { Job, SERVICE_TYPE_LABELS } from '@/types/database';
 import { StatusBadge } from './StatusBadge';
 
 interface JobCardProps {
@@ -67,7 +67,7 @@ export function JobCard({ job }: JobCardProps) {
 
         {/* Service type */}
         <h3 className="font-semibold text-gray-900 text-lg sm:text-xl mb-1 line-clamp-1">
-          {job.service_type}
+          {SERVICE_TYPE_LABELS[job.service_type]}
         </h3>
 
         {/* Address */}

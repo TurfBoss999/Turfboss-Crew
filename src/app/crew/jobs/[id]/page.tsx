@@ -10,7 +10,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { useCrewAuth } from '@/contexts/CrewAuthContext';
 import { StatusBadge, BottomActionBar, IssueModal, ImageUploadPreview } from '@/components';
 import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
-import { Job, JobStatus, IssueType } from '@/types/database';
+import { Job, JobStatus, IssueType, SERVICE_TYPE_LABELS } from '@/types/database';
 
 const supabase = getSupabaseBrowserClient();
 
@@ -157,6 +157,24 @@ export default function JobDetailPage() {
       setError(err instanceof Error ? err.message : 'Failed to update status');
     } finally {
       setIsUpdating(false);
+    }
+  };
+
+  const handleSkidSteerToggle = async (used: boolean) => {
+    if (!job) return;
+
+    try {
+      const { error: updateError } = await supabase
+        .from('jobs')
+        .update({ skid_steer_used: used, updated_at: new Date().toISOString() })
+        .eq('id', job.id);
+
+      if (updateError) throw updateError;
+
+      setJob(prev => prev ? { ...prev, skid_steer_used: used } : null);
+    } catch (err) {
+      console.error('Failed to update skid steer flag:', err);
+      setError(err instanceof Error ? err.message : 'Failed to update skid steer flag');
     }
   };
 
@@ -360,7 +378,7 @@ export default function JobDetailPage() {
             </svg>
           </button>
           <div className="flex-1 min-w-0">
-            <h1 className="font-semibold text-gray-900 truncate sm:text-lg">{job.service_type}</h1>
+            <h1 className="font-semibold text-gray-900 truncate sm:text-lg">{SERVICE_TYPE_LABELS[job.service_type]}</h1>
             <p className="text-sm text-gray-500 truncate sm:text-base">{job.address}</p>
           </div>
         </div>
@@ -377,7 +395,7 @@ export default function JobDetailPage() {
         {/* Address & Navigation Card */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="p-4">
-            <h2 className="font-semibold text-gray-900 mb-1">{job.service_type}</h2>
+            <h2 className="font-semibold text-gray-900 mb-1">{SERVICE_TYPE_LABELS[job.service_type]}</h2>
             <p className="text-gray-600 text-sm">{job.address}</p>
           </div>
 
@@ -448,6 +466,21 @@ export default function JobDetailPage() {
             )}
           </div>
         </div>
+
+        {/* Skid Steer (Plow Lot jobs only) */}
+        {job.service_type === 'plow_lot' && (
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="font-medium text-gray-900">Skid Steer Used</span>
+              <input
+                type="checkbox"
+                checked={job.skid_steer_used}
+                onChange={(e) => handleSkidSteerToggle(e.target.checked)}
+                className="h-5 w-5 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
+              />
+            </label>
+          </div>
+        )}
 
         {/* Service Notes from Admin */}
         {job.service_notes && (

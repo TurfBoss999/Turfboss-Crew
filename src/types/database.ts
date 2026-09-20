@@ -5,6 +5,15 @@
 export type UserRole = 'admin' | 'crew';
 export type JobStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
 
+export type ServiceType = 'salt_lot' | 'plow_lot' | 'salt_walk' | 'shovel_walks';
+
+export const SERVICE_TYPE_LABELS: Record<ServiceType, string> = {
+  salt_lot: 'Salt Lot',
+  plow_lot: 'Plow Lot',
+  salt_walk: 'Salt Walk',
+  shovel_walks: 'Shovel Walks',
+};
+
 export interface Profile {
   id: string;
   role: UserRole;
@@ -22,7 +31,7 @@ export interface Job {
   id: string;
   date: string;
   address: string;
-  service_type: string;      // e.g. "Snow Plowing", "Salting / De-Icing", "Sidewalk Clearing"
+  service_type: ServiceType;
   time_window_start: string | null;
   time_window_end: string | null;
   est_duration_min: number | null;
@@ -31,11 +40,13 @@ export interface Job {
   lat: number | null;
   lng: number | null;
   crew_id: string | null;
+  property_id: string | null;
   status: JobStatus;
   started_at: string | null;
   completed_at: string | null;
   completion_photo_url: string | null;
   image_urls: string[] | null;
+  skid_steer_used: boolean;
   created_at: string;
   updated_at: string;
 }
