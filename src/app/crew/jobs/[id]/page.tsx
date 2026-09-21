@@ -10,7 +10,7 @@ import { useRouter, useParams } from 'next/navigation';
 import { useCrewAuth } from '@/contexts/CrewAuthContext';
 import { StatusBadge, BottomActionBar, IssueModal, ImageUploadPreview } from '@/components';
 import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
-import { Job, JobStatus, IssueType, SERVICE_TYPE_LABELS } from '@/types/database';
+import { Job, JobStatus, IssueType, JobPhoto, PhotoType, SERVICE_TYPE_LABELS } from '@/types/database';
 
 const supabase = getSupabaseBrowserClient();
 
@@ -56,7 +56,9 @@ export default function JobDetailPage() {
   const [isIssueModalOpen, setIsIssueModalOpen] = useState(false);
   const [showSuccess, setShowSuccess] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
-  const [showPhotoUpload, setShowPhotoUpload] = useState(false);
+  const [showBeforePhotoUpload, setShowBeforePhotoUpload] = useState(false);
+  const [showAfterPhotoUpload, setShowAfterPhotoUpload] = useState(false);
+  const [jobPhotos, setJobPhotos] = useState<JobPhoto[]>([]);
 
   const jobId = params?.id as string;
 
@@ -65,14 +67,14 @@ export default function JobDetailPage() {
     if (!jobId) return;
 
     try {
-      const { data, error: fetchError } = await supabase
-        .from('jobs')
-        .select('*')
-        .eq('id', jobId)
-        .single();
+      const [jobResult, photosResult] = await Promise.all([
+        supabase.from('jobs').select('*').eq('id', jobId).single(),
+        supabase.from('job_photos').select('*').eq('job_id', jobId).order('uploaded_at', { ascending: true }),
+      ]);
 
-      if (fetchError) throw fetchError;
-      setJob(data);
+      if (jobResult.error) throw jobResult.error;
+      setJob(jobResult.data);
+      setJobPhotos((photosResult.data as JobPhoto[]) || []);
       setError(null);
     } catch (err) {
       console.error('Failed to fetch job:', err);
@@ -148,9 +150,11 @@ export default function JobDetailPage() {
       
       showSuccessMessage(messages[newStatus]);
 
-      // If completing, show photo upload prompt
-      if (newStatus === 'completed') {
-        setShowPhotoUpload(true);
+      // Offer an optional photo prompt at the two natural checkpoints.
+      if (newStatus === 'in_progress') {
+        setShowBeforePhotoUpload(true);
+      } else if (newStatus === 'completed') {
+        setShowAfterPhotoUpload(true);
       }
     } catch (err) {
       console.error('Failed to update status:', err);
@@ -178,10 +182,11 @@ export default function JobDetailPage() {
     }
   };
 
-  // Handle issue submission
-  const handleIssueSubmit = async (issueType: IssueType, description: string) => {
+  // Handle issue submission — text is required, a photo is optional and
+  // attached to the same job_photos system before/after photos use.
+  const handleIssueSubmit = async (issueType: IssueType, description: string, photoFile: File | null) => {
     if (!job) return;
-    
+
     try {
       const timestamp = new Date().toLocaleString();
       const issueLabel = issueTypeLabels[issueType];
@@ -199,6 +204,10 @@ export default function JobDetailPage() {
 
       if (updateError) throw updateError;
 
+      if (photoFile) {
+        await uploadJobPhoto(photoFile, 'issue');
+      }
+
       // Update local state
       setJob(prev => prev ? { ...prev, field_notes: newFieldNotes } : null);
       setIsIssueModalOpen(false);
@@ -209,44 +218,54 @@ export default function JobDetailPage() {
     }
   };
 
-  // Handle photo upload
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const handlePhotoUpload = async (file: File, _previewUrl: string) => {
+  // Shared upload path for before/after/issue photos — the one system all
+  // three contexts write through, per photo_type rather than a one-off
+  // column each.
+  const uploadJobPhoto = async (file: File, photoType: PhotoType) => {
     if (!job) return;
-    
+
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${job.id}/${photoType}-${Date.now()}.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('job-images')
+      .upload(fileName, file);
+
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from('job-images')
+      .getPublicUrl(fileName);
+
+    const { data: photoRow, error: insertError } = await supabase
+      .from('job_photos')
+      .insert({ job_id: job.id, photo_url: publicUrl, photo_type: photoType })
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
+
+    setJobPhotos(prev => [...prev, photoRow as JobPhoto]);
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleBeforePhotoUpload = async (file: File, _previewUrl: string) => {
     try {
-      // Generate unique filename
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${job.id}/completion_${Date.now()}.${fileExt}`;
-      
-      // Upload to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from('job-images')
-        .upload(fileName, file);
-
-      if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('job-images')
-        .getPublicUrl(fileName);
-
-      // Update job with photo URL
-      const { error: updateError } = await supabase
-        .from('jobs')
-        .update({ 
-          completion_photo_url: publicUrl,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', job.id);
-
-      if (updateError) throw updateError;
-      
-      // Update local state
-      setJob(prev => prev ? { ...prev, completion_photo_url: publicUrl } : null);
-      showSuccessMessage('Photo uploaded successfully');
+      await uploadJobPhoto(file, 'before');
+      showSuccessMessage('Before photo uploaded');
     } catch (err) {
-      console.error('Failed to upload photo:', err);
+      console.error('Failed to upload before photo:', err);
+      setError(err instanceof Error ? err.message : 'Failed to upload photo');
+    }
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleAfterPhotoUpload = async (file: File, _previewUrl: string) => {
+    try {
+      await uploadJobPhoto(file, 'after');
+      showSuccessMessage('After photo uploaded');
+    } catch (err) {
+      console.error('Failed to upload after photo:', err);
       setError(err instanceof Error ? err.message : 'Failed to upload photo');
     }
   };
@@ -556,24 +575,27 @@ export default function JobDetailPage() {
           </div>
         )}
 
-        {/* Photo Upload Section */}
-        {(showPhotoUpload || job.status === 'completed') && (
+        {/* Before Photo Section */}
+        {(showBeforePhotoUpload || job.status === 'in_progress' || job.status === 'completed') && (
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <h3 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
               <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
-              Completion Photo
+              Before Photo
             </h3>
-            
-            {job.completion_photo_url ? (
+
+            {jobPhotos.some(p => p.photo_type === 'before') ? (
               <div className="space-y-3">
-                <img 
-                  src={job.completion_photo_url} 
-                  alt="Completion photo" 
-                  className="w-full aspect-video object-cover rounded-lg"
-                />
+                {jobPhotos.filter(p => p.photo_type === 'before').map(photo => (
+                  <img
+                    key={photo.id}
+                    src={photo.photo_url}
+                    alt="Before photo"
+                    className="w-full aspect-video object-cover rounded-lg"
+                  />
+                ))}
                 <p className="text-sm text-green-600 flex items-center gap-1">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -582,7 +604,41 @@ export default function JobDetailPage() {
                 </p>
               </div>
             ) : (
-              <ImageUploadPreview onUpload={handlePhotoUpload} maxFiles={1} />
+              <ImageUploadPreview onUpload={handleBeforePhotoUpload} maxFiles={1} />
+            )}
+          </div>
+        )}
+
+        {/* After Photo Section */}
+        {(showAfterPhotoUpload || job.status === 'completed') && (
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <h3 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
+              <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+              After Photo
+            </h3>
+
+            {jobPhotos.some(p => p.photo_type === 'after') ? (
+              <div className="space-y-3">
+                {jobPhotos.filter(p => p.photo_type === 'after').map(photo => (
+                  <img
+                    key={photo.id}
+                    src={photo.photo_url}
+                    alt="After photo"
+                    className="w-full aspect-video object-cover rounded-lg"
+                  />
+                ))}
+                <p className="text-sm text-green-600 flex items-center gap-1">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  Photo uploaded
+                </p>
+              </div>
+            ) : (
+              <ImageUploadPreview onUpload={handleAfterPhotoUpload} maxFiles={1} />
             )}
           </div>
         )}

@@ -55,6 +55,17 @@ export interface JobWithCrew extends Job {
   crew: Crew | null;
 }
 
+export type PhotoType = 'before' | 'after' | 'issue';
+
+export interface JobPhoto {
+  id: string;
+  job_id: string;
+  photo_url: string;
+  photo_type: PhotoType;
+  uploaded_at: string;
+  uploaded_by: string | null;
+}
+
 // Issue types for crew reporting
 export type IssueType = 
   | 'equipment_failure' 

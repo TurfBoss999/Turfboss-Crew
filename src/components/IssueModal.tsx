@@ -7,11 +7,12 @@
 
 import { useState } from 'react';
 import { IssueType } from '@/types/database';
+import { ImageUploadPreview } from './ImageUploadPreview';
 
 interface IssueModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (issueType: IssueType, description: string) => void;
+  onSubmit: (issueType: IssueType, description: string, photoFile: File | null) => void;
   jobAddress: string;
 }
 
@@ -27,17 +28,19 @@ const issueTypes: { value: IssueType; label: string; icon: string }[] = [
 export function IssueModal({ isOpen, onClose, onSubmit, jobAddress }: IssueModalProps) {
   const [selectedType, setSelectedType] = useState<IssueType>('other');
   const [description, setDescription] = useState('');
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
 
   const handleSubmit = async () => {
     if (!description.trim()) return;
-    
+
     setIsSubmitting(true);
-    await onSubmit(selectedType, description);
+    await onSubmit(selectedType, description, photoFile);
     setDescription('');
     setSelectedType('other');
+    setPhotoFile(null);
     setIsSubmitting(false);
   };
 
@@ -109,6 +112,27 @@ export function IssueModal({ isOpen, onClose, onSubmit, jobAddress }: IssueModal
               rows={4}
               className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent resize-none text-gray-900 placeholder-gray-400"
             />
+          </div>
+
+          {/* Photo (optional) */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Photo <span className="text-gray-400 font-normal">(optional)</span>
+            </label>
+            {photoFile ? (
+              <div className="flex items-center justify-between rounded-xl border border-gray-200 px-4 py-3">
+                <span className="text-sm text-gray-700 truncate">{photoFile.name}</span>
+                <button
+                  type="button"
+                  onClick={() => setPhotoFile(null)}
+                  className="text-sm text-red-600 font-medium shrink-0 ml-3"
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <ImageUploadPreview onUpload={(file) => setPhotoFile(file)} maxFiles={1} />
+            )}
           </div>
         </div>
 
