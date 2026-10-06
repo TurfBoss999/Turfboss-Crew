@@ -5,12 +5,12 @@
 // Real Supabase Database
 // ================================
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useCrewAuth } from '@/contexts/CrewAuthContext';
 import { StatusBadge, BottomActionBar, IssueModal, ImageUploadPreview } from '@/components';
 import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
-import { Job, JobStatus, IssueType, JobPhoto, PhotoType, SERVICE_TYPE_LABELS } from '@/types/database';
+import { Job, JobWithCrew, JobStatus, IssueType, JobPhoto, PhotoType, SERVICE_TYPE_LABELS } from '@/types/database';
 
 const supabase = getSupabaseBrowserClient();
 
@@ -50,15 +50,18 @@ export default function JobDetailPage() {
   const params = useParams();
   const { profile, isAuthenticated, isLoading: authLoading } = useCrewAuth();
   
-  const [job, setJob] = useState<Job | null>(null);
+  const [job, setJob] = useState<JobWithCrew | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isIssueModalOpen, setIsIssueModalOpen] = useState(false);
   const [showSuccess, setShowSuccess] = useState<string | null>(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [showBeforePhotoUpload, setShowBeforePhotoUpload] = useState(false);
-  const [showAfterPhotoUpload, setShowAfterPhotoUpload] = useState(false);
   const [jobPhotos, setJobPhotos] = useState<JobPhoto[]>([]);
+  // A visible, dismiss-on-fix message for things that stop an action (e.g. Complete
+  // without an after photo), so a blocked tap is never a silent no-op.
+  const [notice, setNotice] = useState<string | null>(null);
+  const afterPhotoRef = useRef<HTMLDivElement>(null);
 
   const jobId = params?.id as string;
 
@@ -68,7 +71,7 @@ export default function JobDetailPage() {
 
     try {
       const [jobResult, photosResult] = await Promise.all([
-        supabase.from('jobs').select('*').eq('id', jobId).single(),
+        supabase.from('jobs').select('*, crew:crews(*)').eq('id', jobId).single(),
         supabase.from('job_photos').select('*').eq('job_id', jobId).order('uploaded_at', { ascending: true }),
       ]);
 
@@ -110,11 +113,22 @@ export default function JobDetailPage() {
     setTimeout(() => setShowSuccess(null), 2500);
   };
 
-  // Update job status
+  const hasAfterPhoto = jobPhotos.some(p => p.photo_type === 'after');
+
+  // Update Sub Job status
   const handleStatusUpdate = async (newStatus: JobStatus) => {
     if (!job) return;
-    
+
+    // Completing needs an after photo. Say so out loud and point at the photo
+    // card instead of letting Complete quietly do nothing.
+    if (newStatus === 'completed' && !hasAfterPhoto) {
+      setNotice('Add an after photo to complete this Sub Job. Use the After Photo section below, then tap Complete again.');
+      afterPhotoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+
     setIsUpdating(true);
+    setNotice(null);
 
     try {
       const now = new Date().toISOString();
@@ -129,32 +143,40 @@ export default function JobDetailPage() {
         updatePayload.started_at = now;
       } else if (newStatus === 'completed') {
         updatePayload.completed_at = now;
+        // crew_id now means "the crew that completed this Sub Job", written here.
+        updatePayload.crew_id = profile?.crew_id ?? null;
       }
 
-      const { error: updateError } = await supabase
+      const { data: updatedRows, error: updateError } = await supabase
         .from('jobs')
         .update(updatePayload)
-        .eq('id', job.id);
+        .eq('id', job.id)
+        .select('*, crew:crews(*)');
 
       if (updateError) throw updateError;
 
-      // Update local state optimistically
-      setJob(prev => prev ? { ...prev, ...updatePayload } : null);
-      
+      // Zero rows means the update matched nothing: another crew on this Job finished
+      // (or claimed) it first. That isn't an error from the database, so check for it.
+      if (!updatedRows || updatedRows.length === 0) {
+        await fetchJob();
+        setNotice('Another crew just updated this Sub Job, so your change was not saved. It has been refreshed.');
+        return;
+      }
+
+      setJob(updatedRows[0] as JobWithCrew);
+
       const messages: Record<JobStatus, string> = {
-        scheduled: 'Job reset to scheduled',
-        in_progress: 'Job started!',
-        completed: 'Job completed!',
-        cancelled: 'Job cancelled',
+        scheduled: 'Sub Job reset to scheduled',
+        in_progress: 'Sub Job started!',
+        completed: 'Sub Job completed!',
+        cancelled: 'Sub Job cancelled',
       };
-      
+
       showSuccessMessage(messages[newStatus]);
 
-      // Offer an optional photo prompt at the two natural checkpoints.
+      // The before photo stays an optional prompt at Start.
       if (newStatus === 'in_progress') {
         setShowBeforePhotoUpload(true);
-      } else if (newStatus === 'completed') {
-        setShowAfterPhotoUpload(true);
       }
     } catch (err) {
       console.error('Failed to update status:', err);
@@ -263,6 +285,7 @@ export default function JobDetailPage() {
   const handleAfterPhotoUpload = async (file: File, _previewUrl: string) => {
     try {
       await uploadJobPhoto(file, 'after');
+      setNotice(null);
       showSuccessMessage('After photo uploaded');
     } catch (err) {
       console.error('Failed to upload after photo:', err);
@@ -407,9 +430,21 @@ export default function JobDetailPage() {
       <div className="p-4 space-y-4 sm:px-6 lg:px-8">
         <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6">
         {/* Status Badge */}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={job.status} />
+          {!job.crew_id && (job.status === 'scheduled' || job.status === 'in_progress') && (
+            <span className="text-xs font-medium text-gray-500 bg-gray-100 rounded-full px-2.5 py-1">Available</span>
+          )}
+          {job.status === 'completed' && job.crew && (
+            <span className="text-sm text-gray-500">Completed by {job.crew.name}</span>
+          )}
         </div>
+
+        {notice && (
+          <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {notice}
+          </div>
+        )}
 
         {/* Address & Navigation Card */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
@@ -609,15 +644,20 @@ export default function JobDetailPage() {
           </div>
         )}
 
-        {/* After Photo Section */}
-        {(showAfterPhotoUpload || job.status === 'completed') && (
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
+        {/* After Photo Section: required before a Sub Job can be completed */}
+        {(job.status === 'in_progress' || job.status === 'completed') && (
+          <div ref={afterPhotoRef} className={`bg-white rounded-xl border p-4 ${notice && !hasAfterPhoto ? 'border-red-300 ring-2 ring-red-100' : 'border-gray-200'}`}>
             <h3 className="font-medium text-gray-900 mb-3 flex items-center gap-2">
               <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
               After Photo
+              {job.status === 'in_progress' && !hasAfterPhoto && (
+                <span className="ml-auto text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2.5 py-0.5">
+                  Required to complete
+                </span>
+              )}
             </h3>
 
             {jobPhotos.some(p => p.photo_type === 'after') ? (
@@ -658,7 +698,7 @@ export default function JobDetailPage() {
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
-              <span className="font-medium">Job Completed</span>
+              <span className="font-medium">Sub Job Completed</span>
             </div>
           </div>
         </div>

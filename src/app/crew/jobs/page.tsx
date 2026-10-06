@@ -10,7 +10,7 @@ import { useRouter } from 'next/navigation';
 import { useCrewAuth } from '@/contexts/CrewAuthContext';
 import { JobCard } from '@/components';
 import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
-import { Job } from '@/types/database';
+import { JobWithCrew } from '@/types/database';
 
 const supabase = getSupabaseBrowserClient();
 
@@ -19,7 +19,7 @@ type FilterType = 'all' | 'today' | 'upcoming' | 'completed';
 export default function CrewJobsPage() {
   const router = useRouter();
   const { crewInfo, profile, isAuthenticated, isLoading: authLoading, logout } = useCrewAuth();
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobs, setJobs] = useState<JobWithCrew[]>([]);
   const [filter, setFilter] = useState<FilterType>('all');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -34,11 +34,14 @@ export default function CrewJobsPage() {
     }
     
     try {
+      // No crew_id filter: a crew sees every Sub Job of the Jobs it is assigned to, and
+      // row-level security (via job_visit_crews) is what limits that. Ordering by Job keeps
+      // one property's Sub Jobs together.
       const { data, error: fetchError } = await supabase
         .from('jobs')
-        .select('*')
-        .eq('crew_id', profile.crew_id)
-        .order('date', { ascending: true });
+        .select('*, crew:crews(*)')
+        .order('date', { ascending: true })
+        .order('job_visit_id', { ascending: true });
       
       console.log('Jobs query result:', { data, error: fetchError });
       

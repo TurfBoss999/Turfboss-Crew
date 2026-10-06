@@ -6,11 +6,11 @@
 // ================================
 
 import Link from 'next/link';
-import { Job, SERVICE_TYPE_LABELS } from '@/types/database';
+import { JobWithCrew, SERVICE_TYPE_LABELS } from '@/types/database';
 import { StatusBadge } from './StatusBadge';
 
 interface JobCardProps {
-  job: Job;
+  job: JobWithCrew;
 }
 
 // Format time window display
@@ -49,7 +49,18 @@ export function JobCard({ job }: JobCardProps) {
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 active:bg-gray-50 transition-colors hover:shadow-md sm:p-5">
         {/* Header with status badge */}
         <div className="flex items-start justify-between mb-3">
-          <StatusBadge status={job.status} />
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={job.status} />
+            {/* Nobody has claimed it yet: any crew on this Job can pick it up */}
+            {!job.crew_id && (job.status === 'scheduled' || job.status === 'in_progress') && (
+              <span className="text-xs font-medium text-gray-500 bg-gray-100 rounded-full px-2.5 py-1">
+                Available
+              </span>
+            )}
+            {job.status === 'completed' && job.crew && (
+              <span className="text-xs text-gray-500">Completed by {job.crew.name}</span>
+            )}
+          </div>
           <svg
             className="w-5 h-5 text-gray-400 shrink-0 mt-0.5"
             fill="none"

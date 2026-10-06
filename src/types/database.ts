@@ -41,6 +41,7 @@ export interface Job {
   lng: number | null;
   crew_id: string | null;
   property_id: string | null;
+  job_visit_id: string | null;
   status: JobStatus;
   started_at: string | null;
   completed_at: string | null;
