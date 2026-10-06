@@ -57,8 +57,10 @@ export function JobCard({ job }: JobCardProps) {
                 Available
               </span>
             )}
-            {job.status === 'completed' && job.crew && (
-              <span className="text-xs text-gray-500">Completed by {job.crew.name}</span>
+            {job.crew && (job.status === 'in_progress' || job.status === 'completed') && (
+              <span className="text-xs text-gray-500">
+                {job.status === 'completed' ? 'Completed by' : 'Claimed by'} {job.crew.name}
+              </span>
             )}
           </div>
           <svg

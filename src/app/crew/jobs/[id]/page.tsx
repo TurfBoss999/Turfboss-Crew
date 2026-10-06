@@ -139,11 +139,13 @@ export default function JobDetailPage() {
 
       // Real timestamps are only ever set by the crew's own Start/Complete
       // actions, not by any status change coming from elsewhere.
+      // crew_id means "the crew that claimed this Sub Job": written at Start, and again at
+      // Complete so a Sub Job started before claiming existed still ends up credited.
       if (newStatus === 'in_progress') {
         updatePayload.started_at = now;
+        updatePayload.crew_id = profile?.crew_id ?? null;
       } else if (newStatus === 'completed') {
         updatePayload.completed_at = now;
-        // crew_id now means "the crew that completed this Sub Job", written here.
         updatePayload.crew_id = profile?.crew_id ?? null;
       }
 
@@ -299,6 +301,11 @@ export default function JobDetailPage() {
 
     const buttons = [];
 
+    // Another crew on this Job has claimed it: the database would silently ignore our
+    // update, so don't offer buttons that can't work.
+    const claimedByOtherCrew = !!job.crew_id && job.crew_id !== profile?.crew_id;
+    if (claimedByOtherCrew && job.status !== 'completed' && job.status !== 'cancelled') return [];
+
     if (job.status === 'scheduled') {
       buttons.push({
         label: 'Start Job',
@@ -435,8 +442,10 @@ export default function JobDetailPage() {
           {!job.crew_id && (job.status === 'scheduled' || job.status === 'in_progress') && (
             <span className="text-xs font-medium text-gray-500 bg-gray-100 rounded-full px-2.5 py-1">Available</span>
           )}
-          {job.status === 'completed' && job.crew && (
-            <span className="text-sm text-gray-500">Completed by {job.crew.name}</span>
+          {job.crew && (job.status === 'in_progress' || job.status === 'completed') && (
+            <span className="text-sm text-gray-500">
+              {job.status === 'completed' ? 'Completed by' : 'Claimed by'} {job.crew.name}
+            </span>
           )}
         </div>
 
