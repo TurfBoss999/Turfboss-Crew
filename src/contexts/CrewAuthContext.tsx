@@ -380,16 +380,23 @@ export function CrewAuthProvider({ children }: CrewAuthProviderProps) {
     }
 
     // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent, currentSession: Session | null) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, currentSession: Session | null) => {
       console.log('[Auth] onAuthStateChange event:', event);
-      
+
       // Skip if we're processing initial session and this is INITIAL_SESSION event
       // to avoid double processing
       if (event === 'INITIAL_SESSION' && hasInitializedRef.current) {
         return;
       }
-      
-      await processSession(currentSession, `onAuthStateChange:${event}`);
+
+      // Don't await Supabase calls inside this callback. Some auth calls (updateUser, for
+      // one) hold the auth lock while they wait for listeners, and the profile lookup in
+      // processSession needs that same lock, so awaiting here froze the caller: a password
+      // reset saved but the page stayed on "Resetting..." forever. Handing the work off
+      // lets the original call finish first.
+      setTimeout(() => {
+        void processSession(currentSession, `onAuthStateChange:${event}`);
+      }, 0);
     });
 
     // Immediately fetch session - this is the primary initialization

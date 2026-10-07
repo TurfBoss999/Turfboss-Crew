@@ -10,6 +10,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCrewAuth } from '@/contexts/CrewAuthContext';
 import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
+import { rememberResetEmail } from '@/lib/passwordReset';
 
 const supabase = getSupabaseBrowserClient();
 
@@ -45,6 +46,7 @@ export default function CrewLoginPage() {
       });
 
       if (error) throw error;
+      rememberResetEmail(resetEmail.trim());
       setResetSent(true);
     } catch (err) {
       setResetError(err instanceof Error ? err.message : 'Failed to send reset email');
@@ -237,16 +239,24 @@ export default function CrewLoginPage() {
                   </svg>
                 </div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">Check Your Email</h3>
-                <p className="text-gray-600 text-sm mb-6">
-                  We&apos;ve sent a password reset link to <strong>{resetEmail}</strong>
+                <p className="text-gray-600 text-sm mb-3">
+                  We&apos;ve sent a password reset email to <strong>{resetEmail}</strong>. It has a link and a code.
+                  If you are using this app on your phone, the easiest way is to enter the code here.
                 </p>
+                <p className="text-gray-500 text-xs mb-6">If you don&apos;t see it, check your junk folder.</p>
+                <button
+                  onClick={() => router.push('/crew/reset-password')}
+                  className="w-full py-3 px-4 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700 transition-colors mb-3"
+                >
+                  Enter the code from the email
+                </button>
                 <button
                   onClick={() => {
                     setShowForgotPassword(false);
                     setResetSent(false);
                     setResetEmail('');
                   }}
-                  className="w-full py-3 px-4 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700 transition-colors"
+                  className="w-full py-3 px-4 border border-gray-300 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors"
                 >
                   Back to Sign In
                 </button>
@@ -255,7 +265,7 @@ export default function CrewLoginPage() {
               <>
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">Reset Password</h3>
                 <p className="text-gray-600 text-sm mb-4">
-                  Enter your email address and we&apos;ll send you a link to reset your password.
+                  Enter your email address and we&apos;ll send you an email with a link and a code to reset your password.
                 </p>
                 
                 <form onSubmit={handleForgotPassword} className="space-y-4">
@@ -294,7 +304,7 @@ export default function CrewLoginPage() {
                           : 'bg-emerald-600 hover:bg-emerald-700'
                       }`}
                     >
-                      {isResetting ? 'Sending...' : 'Send Link'}
+                      {isResetting ? 'Sending...' : 'Send Email'}
                     </button>
                   </div>
                 </form>

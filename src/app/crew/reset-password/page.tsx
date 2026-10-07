@@ -5,12 +5,24 @@
 // Handles password reset from email link
 // ================================
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
+import {
+  recallResetEmail,
+  classifyLinkError,
+  describeCodeError,
+  LINK_PROBLEM_MESSAGES,
+  type LinkProblem,
+} from '@/lib/passwordReset';
 import type { AuthChangeEvent } from '@supabase/supabase-js';
 
 const supabase = getSupabaseBrowserClient();
+
+// checking: working out whether the emailed link gave us a session
+// code: the link could not finish here, so ask for the emailed code instead
+// password: we have a recovery session, ask for the new password
+type Stage = 'checking' | 'code' | 'password' | 'success';
 
 export default function ResetPasswordPage() {
   const router = useRouter();
@@ -18,36 +30,112 @@ export default function ResetPasswordPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isSuccess, setIsSuccess] = useState(false);
-  const [isValidSession, setIsValidSession] = useState(false);
-  const [isChecking, setIsChecking] = useState(true);
+  const [stage, setStage] = useState<Stage>('checking');
+  const [problem, setProblem] = useState<LinkProblem>('none');
+  const [email, setEmail] = useState('');
+  const [otp, setOtp] = useState('');
+  const [codeError, setCodeError] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  // Strict mode runs effects twice in development; the emailed code is single-use, so
+  // make sure only one pass ever tries to use it.
+  const linkHandled = useRef(false);
 
-  // Check if we have a valid recovery session
   useEffect(() => {
-    const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      // Check if this is a recovery session (from email link)
-      if (session) {
-        setIsValidSession(true);
-      }
-      setIsChecking(false);
-    };
+    setEmail(recallResetEmail());
 
-    // Listen for auth state changes (recovery link will trigger this)
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: AuthChangeEvent) => {
+    // The recovery event can arrive from the client's own URL handling
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: AuthChangeEvent) => {
       if (event === 'PASSWORD_RECOVERY') {
-        setIsValidSession(true);
-        setIsChecking(false);
+        setStage((current) => (current === 'success' ? current : 'password'));
       }
     });
 
-    checkSession();
+    const resolveLink = async () => {
+      const url = new URL(window.location.href);
+      const code = url.searchParams.get('code');
+      const hash = new URLSearchParams(url.hash.replace(/^#/, ''));
+      const linkErrorCode = hash.get('error_code') ?? url.searchParams.get('error_code');
+      // Keep the one-time code out of the address bar once we have read it
+      const cleanUrl = () => window.history.replaceState(null, '', url.pathname);
+
+      // getSession waits for the client to start up. If this browser is the one that asked
+      // for the reset, the client has already traded the ?code= for a session by now.
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        cleanUrl();
+        setStage('password');
+        return;
+      }
+
+      if (code) {
+        // Trade the code ourselves so the real reason for a failure is visible. It fails
+        // without any network call when the secret saved by the requesting browser is missing.
+        const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+        if (!exchangeError) {
+          cleanUrl();
+          setStage('password');
+          return;
+        }
+        console.error(
+          '[reset-password] code exchange failed:',
+          exchangeError.name,
+          exchangeError.code,
+          exchangeError.message
+        );
+        cleanUrl();
+        setProblem(classifyLinkError(exchangeError));
+      } else if (linkErrorCode) {
+        // The email server rejected the link itself (already used, or past its time limit)
+        console.error('[reset-password] link rejected:', linkErrorCode, hash.get('error_description'));
+        cleanUrl();
+        setProblem(linkErrorCode === 'otp_expired' ? 'expired' : 'invalid');
+      }
+
+      setStage('code');
+    };
+
+    if (!linkHandled.current) {
+      linkHandled.current = true;
+      resolveLink().catch((err) => {
+        console.error('[reset-password] unexpected error while checking the link:', err);
+        setProblem('invalid');
+        setStage('code');
+      });
+    }
 
     return () => {
       subscription.unsubscribe();
     };
   }, []);
+
+  // Finish with the code from the email. This does not depend on which browser or app
+  // asked for the reset, so it works from the home-screen app.
+  const handleVerifyCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCodeError('');
+    setIsVerifying(true);
+
+    try {
+      const { error: verifyError } = await supabase.auth.verifyOtp({
+        email: email.trim(),
+        token: otp.replace(/\s/g, ''),
+        type: 'recovery',
+      });
+
+      if (verifyError) {
+        console.error('[reset-password] code check failed:', verifyError.name, verifyError.code, verifyError.message);
+        setCodeError(describeCodeError(verifyError));
+        return;
+      }
+
+      setStage('password');
+    } catch (err) {
+      console.error('[reset-password] code check failed:', err);
+      setCodeError('Something went wrong. Check your connection and try again.');
+    } finally {
+      setIsVerifying(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,8 +160,8 @@ export default function ResetPasswordPage() {
 
       if (error) throw error;
       
-      setIsSuccess(true);
-      
+      setStage('success');
+
       // Redirect to login after 3 seconds
       setTimeout(() => {
         router.replace('/crew/login');
@@ -85,7 +173,7 @@ export default function ResetPasswordPage() {
     }
   };
 
-  if (isChecking) {
+  if (stage === 'checking') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-b from-emerald-600 to-emerald-800">
         <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
@@ -93,25 +181,82 @@ export default function ResetPasswordPage() {
     );
   }
 
-  if (!isValidSession && !isChecking) {
+  if (stage === 'code') {
     return (
       <div className="min-h-screen flex flex-col justify-center px-6 py-12 bg-gradient-to-b from-emerald-600 to-emerald-800">
         <div className="w-full max-w-sm mx-auto">
-          <div className="bg-white rounded-2xl shadow-xl p-6 text-center">
-            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg className="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-              </svg>
+          <div className="bg-white rounded-2xl shadow-xl p-6">
+            <div className="text-center mb-5">
+              <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <h2 className="text-xl font-semibold text-gray-900 mb-2">Enter Your Code</h2>
+              <p className="text-gray-600 text-sm">{LINK_PROBLEM_MESSAGES[problem]}</p>
             </div>
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">Invalid or Expired Link</h2>
-            <p className="text-gray-600 text-sm mb-6">
-              This password reset link is invalid or has expired. Please request a new one.
-            </p>
+
+            <form onSubmit={handleVerifyCode} className="space-y-4">
+              <div>
+                <label htmlFor="resetEmail" className="block text-sm font-medium text-gray-700 mb-2">
+                  Email
+                </label>
+                <input
+                  id="resetEmail"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Enter your email"
+                  autoComplete="email"
+                  required
+                  className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all text-gray-900 placeholder-gray-400 text-base"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="resetCode" className="block text-sm font-medium text-gray-700 mb-2">
+                  Code from the email
+                </label>
+                <input
+                  id="resetCode"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9 ]*"
+                  autoComplete="one-time-code"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  placeholder="Enter the code"
+                  required
+                  minLength={6}
+                  maxLength={12}
+                  className="w-full px-4 py-3.5 border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all text-gray-900 placeholder-gray-400 text-base tracking-widest"
+                />
+              </div>
+
+              {codeError && (
+                <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm">
+                  {codeError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={isVerifying}
+                className={`w-full py-4 px-4 rounded-xl font-semibold text-white transition-all text-base ${
+                  isVerifying
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-emerald-600 active:bg-emerald-700 hover:bg-emerald-700'
+                }`}
+              >
+                {isVerifying ? 'Checking...' : 'Continue'}
+              </button>
+            </form>
+
             <button
               onClick={() => router.replace('/crew/login')}
-              className="w-full py-3 px-4 bg-emerald-600 text-white rounded-xl font-semibold hover:bg-emerald-700 transition-colors"
+              className="w-full mt-4 text-sm text-emerald-700 underline"
             >
-              Back to Sign In
+              Back to Sign In to ask for a new email
             </button>
           </div>
         </div>
@@ -119,7 +264,7 @@ export default function ResetPasswordPage() {
     );
   }
 
-  if (isSuccess) {
+  if (stage === 'success') {
     return (
       <div className="min-h-screen flex flex-col justify-center px-6 py-12 bg-gradient-to-b from-emerald-600 to-emerald-800">
         <div className="w-full max-w-sm mx-auto">
