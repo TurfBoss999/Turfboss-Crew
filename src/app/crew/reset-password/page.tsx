@@ -36,6 +36,8 @@ export default function ResetPasswordPage() {
   const [otp, setOtp] = useState('');
   const [codeError, setCodeError] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [resendNote, setResendNote] = useState('');
   // Strict mode runs effects twice in development; the emailed code is single-use, so
   // make sure only one pass ever tries to use it.
   const linkHandled = useRef(false);
@@ -107,6 +109,41 @@ export default function ResetPasswordPage() {
       subscription.unsubscribe();
     };
   }, []);
+
+  // A new email replaces the old one (the old link and code stop working), which is the
+  // fix when the link was tapped and used up the code.
+  const handleResend = async () => {
+    setCodeError('');
+    setResendNote('');
+    if (!email.trim()) {
+      setCodeError('Enter your email address above first, then send the new email.');
+      return;
+    }
+    setIsResending(true);
+    try {
+      const { error: sendError } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: `${window.location.origin}/crew/reset-password`,
+      });
+      if (sendError) {
+        console.error('[reset-password] resend failed:', sendError.name, sendError.code, sendError.message);
+        setCodeError(
+          sendError.status === 429 || sendError.code === 'over_email_send_rate_limit'
+            ? 'You asked for an email a moment ago. Wait a minute, then try again.'
+            : 'We could not send the email. Check the address and try again.'
+        );
+        return;
+      }
+      setOtp('');
+      setResendNote(
+        'New email sent. Open it, read the code, and type it above. Do not tap the link in the email. If you do not see it, check your junk folder.'
+      );
+    } catch (err) {
+      console.error('[reset-password] resend failed:', err);
+      setCodeError('Something went wrong. Check your connection and try again.');
+    } finally {
+      setIsResending(false);
+    }
+  };
 
   // Finish with the code from the email. This does not depend on which browser or app
   // asked for the reset, so it works from the home-screen app.
@@ -239,6 +276,12 @@ export default function ResetPasswordPage() {
                 </div>
               )}
 
+              {resendNote && (
+                <div role="status" className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-xl text-sm">
+                  {resendNote}
+                </div>
+              )}
+
               <button
                 type="submit"
                 disabled={isVerifying}
@@ -253,10 +296,19 @@ export default function ResetPasswordPage() {
             </form>
 
             <button
+              type="button"
+              onClick={handleResend}
+              disabled={isResending}
+              className="w-full mt-3 py-3 px-4 border border-emerald-600 text-emerald-700 rounded-xl font-medium hover:bg-emerald-50 transition-colors disabled:opacity-50"
+            >
+              {isResending ? 'Sending...' : 'Send me a new email'}
+            </button>
+
+            <button
               onClick={() => router.replace('/crew/login')}
               className="w-full mt-4 text-sm text-emerald-700 underline"
             >
-              Back to Sign In to ask for a new email
+              Back to Sign In
             </button>
           </div>
         </div>

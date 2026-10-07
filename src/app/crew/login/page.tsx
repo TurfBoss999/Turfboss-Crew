@@ -240,8 +240,12 @@ export default function CrewLoginPage() {
                 </div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">Check Your Email</h3>
                 <p className="text-gray-600 text-sm mb-3">
-                  We&apos;ve sent a password reset email to <strong>{resetEmail}</strong>. It has a link and a code.
-                  If you are using this app on your phone, the easiest way is to enter the code here.
+                  We&apos;ve sent a password reset email to <strong>{resetEmail}</strong>. Open it, read the code, and
+                  type it here in the app.
+                </p>
+                <p className="text-gray-700 text-sm font-medium mb-3">
+                  Do not tap the link in the email. The link and the code are the same one-time key, so tapping the
+                  link uses up the code.
                 </p>
                 <p className="text-gray-500 text-xs mb-6">If you don&apos;t see it, check your junk folder.</p>
                 <button
@@ -265,7 +269,7 @@ export default function CrewLoginPage() {
               <>
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">Reset Password</h3>
                 <p className="text-gray-600 text-sm mb-4">
-                  Enter your email address and we&apos;ll send you an email with a link and a code to reset your password.
+                  Enter your email address and we&apos;ll send you an email with a code to reset your password.
                 </p>
                 
                 <form onSubmit={handleForgotPassword} className="space-y-4">
