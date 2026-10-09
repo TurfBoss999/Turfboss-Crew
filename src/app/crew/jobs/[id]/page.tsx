@@ -58,6 +58,10 @@ export default function JobDetailPage() {
   const [isUpdating, setIsUpdating] = useState(false);
   const [showBeforePhotoUpload, setShowBeforePhotoUpload] = useState(false);
   const [jobPhotos, setJobPhotos] = useState<JobPhoto[]>([]);
+  // The property's site map, if it has one. Shown near the top; tap to see it full size.
+  const [siteMapUrl, setSiteMapUrl] = useState<string | null>(null);
+  const [siteMapOpen, setSiteMapOpen] = useState(false);
+  const [siteMapZoomed, setSiteMapZoomed] = useState(false);
   // A visible, dismiss-on-fix message for things that stop an action (e.g. Complete
   // without an after photo), so a blocked tap is never a silent no-op.
   const [notice, setNotice] = useState<string | null>(null);
@@ -79,6 +83,12 @@ export default function JobDetailPage() {
       setJob(jobResult.data);
       setJobPhotos((photosResult.data as JobPhoto[]) || []);
       setError(null);
+
+      // The site map comes through a narrow database function that returns only its address, and
+      // only for a Job this crew is on (crews cannot read property rows). A failure here must never
+      // block the Job itself, so any error just means no site map is shown.
+      const siteMapResult = await supabase.rpc('get_site_map_for_job', { p_job_id: jobId });
+      setSiteMapUrl(!siteMapResult.error && typeof siteMapResult.data === 'string' ? siteMapResult.data : null);
     } catch (err) {
       console.error('Failed to fetch job:', err);
       setError(err instanceof Error ? err.message : 'Failed to load job');
@@ -415,6 +425,35 @@ export default function JobDetailPage() {
         </div>
       )}
 
+      {/* Site map full size */}
+      {siteMapOpen && siteMapUrl && (
+        <div className="fixed inset-0 z-[60] flex flex-col bg-black" role="dialog" aria-modal="true" aria-label="Site map">
+          <div className="flex items-center justify-between gap-2 bg-black/80 px-4 py-3 text-white">
+            <button
+              type="button"
+              onClick={() => setSiteMapZoomed((z) => !z)}
+              className="rounded-lg bg-white/15 px-4 py-2 text-sm font-medium"
+            >
+              {siteMapZoomed ? 'Fit to screen' : 'Zoom in'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSiteMapOpen(false)}
+              className="rounded-lg bg-white/15 px-4 py-2 text-sm font-medium"
+            >
+              Close
+            </button>
+          </div>
+          <div className="flex-1 overflow-auto">
+            <img
+              src={siteMapUrl}
+              alt="Site map, full size"
+              className={siteMapZoomed ? 'max-w-none w-[250%]' : 'mx-auto h-full w-full object-contain'}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white border-b border-gray-200 sticky top-0 z-40">
         <div className="max-w-4xl mx-auto flex items-center gap-3 px-4 py-4 sm:px-6 lg:px-8">
@@ -452,6 +491,22 @@ export default function JobDetailPage() {
         {notice && (
           <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {notice}
+          </div>
+        )}
+
+        {/* Site map (the picture that shows which areas to work). Nothing is shown when there is none. */}
+        {siteMapUrl && (
+          <div className="bg-white rounded-xl border border-gray-200 p-4">
+            <h3 className="font-medium text-gray-900 mb-3">Site map</h3>
+            <button
+              type="button"
+              onClick={() => { setSiteMapZoomed(false); setSiteMapOpen(true); }}
+              className="block w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-100"
+              aria-label="Open the site map full size"
+            >
+              <img src={siteMapUrl} alt="Site map" className="w-full max-h-72 object-contain" />
+            </button>
+            <p className="mt-2 text-xs text-gray-500">Tap the map to see it full size.</p>
           </div>
         )}
 
