@@ -53,6 +53,9 @@ export interface Job {
 
 export interface JobWithCrew extends Job {
   crew: Crew | null;
+  // The Job (property visit) this Sub Job belongs to. route_order is its stop number on the day's
+  // route, set by the office; null when no route was planned for it.
+  job_visit?: { route_order: number | null } | null;
 }
 
 export type PhotoType = 'before' | 'after' | 'issue';
