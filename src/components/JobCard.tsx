@@ -50,6 +50,12 @@ export function JobCard({ job }: JobCardProps) {
         {/* Header with status badge */}
         <div className="flex items-start justify-between mb-3">
           <div className="flex flex-wrap items-center gap-2">
+            {/* Planned stop number for the day's route, when the office has set one */}
+            {job.job_visit?.route_order != null && (
+              <span className="text-xs font-semibold text-white bg-gray-800 rounded-full px-2.5 py-1">
+                Stop {job.job_visit.route_order}
+              </span>
+            )}
             <StatusBadge status={job.status} />
             {/* Nobody has claimed it yet: any crew on this Job can pick it up */}
             {!job.crew_id && (job.status === 'scheduled' || job.status === 'in_progress') && (

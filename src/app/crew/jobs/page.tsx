@@ -16,6 +16,22 @@ const supabase = getSupabaseBrowserClient();
 
 type FilterType = 'all' | 'today' | 'upcoming' | 'completed';
 
+// Date first, then the planned stop number (Jobs with no number go last), then Job, so one
+// property's Sub Jobs stay together. The database already sorts by date and Job; this adds the stop.
+function sortByRoute(list: JobWithCrew[]): JobWithCrew[] {
+  const stop = (j: JobWithCrew) => j.job_visit?.route_order ?? Number.POSITIVE_INFINITY;
+  return list.slice().sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+    const sa = stop(a);
+    const sb = stop(b);
+    if (sa !== sb) return sa < sb ? -1 : 1;
+    const va = a.job_visit_id ?? '';
+    const vb = b.job_visit_id ?? '';
+    if (va !== vb) return va < vb ? -1 : 1;
+    return 0;
+  });
+}
+
 export default function CrewJobsPage() {
   const router = useRouter();
   const { crewInfo, profile, isAuthenticated, isLoading: authLoading, logout } = useCrewAuth();
@@ -35,18 +51,31 @@ export default function CrewJobsPage() {
     
     try {
       // No crew_id filter: a crew sees every Sub Job of the Jobs it is assigned to, and
-      // row-level security (via job_visit_crews) is what limits that. Ordering by Job keeps
-      // one property's Sub Jobs together.
-      const { data, error: fetchError } = await supabase
+      // row-level security (via job_visit_crews) is what limits that. The Job's stop number
+      // (route_order) comes along so the list can follow the planned route.
+      let { data, error: fetchError } = await supabase
         .from('jobs')
-        .select('*, crew:crews(*)')
+        .select('*, crew:crews(*), job_visit:job_visits(route_order)')
         .order('date', { ascending: true })
         .order('job_visit_id', { ascending: true });
-      
+
+      if (fetchError) {
+        // The stop-number column may not exist yet (the database script has not been run).
+        // Fall back to the plain list rather than showing a crew nothing at all.
+        console.warn('Stop numbers unavailable, loading jobs without them:', fetchError.message);
+        const plain = await supabase
+          .from('jobs')
+          .select('*, crew:crews(*)')
+          .order('date', { ascending: true })
+          .order('job_visit_id', { ascending: true });
+        data = plain.data;
+        fetchError = plain.error;
+      }
+
       console.log('Jobs query result:', { data, error: fetchError });
       
       if (fetchError) throw fetchError;
-      setJobs(data || []);
+      setJobs(sortByRoute((data || []) as JobWithCrew[]));
       setError(null);
     } catch (err) {
       console.error('Failed to fetch jobs:', err);
