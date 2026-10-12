@@ -8,29 +8,14 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCrewAuth } from '@/contexts/CrewAuthContext';
-import { JobCard } from '@/components';
+import { VisitCard } from '@/components';
+import { groupByVisit, todayLocalISO } from '@/lib/jobVisits';
 import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
 import { JobWithCrew } from '@/types/database';
 
 const supabase = getSupabaseBrowserClient();
 
 type FilterType = 'all' | 'today' | 'upcoming' | 'completed';
-
-// Date first, then the planned stop number (Jobs with no number go last), then Job, so one
-// property's Sub Jobs stay together. The database already sorts by date and Job; this adds the stop.
-function sortByRoute(list: JobWithCrew[]): JobWithCrew[] {
-  const stop = (j: JobWithCrew) => j.job_visit?.route_order ?? Number.POSITIVE_INFINITY;
-  return list.slice().sort((a, b) => {
-    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
-    const sa = stop(a);
-    const sb = stop(b);
-    if (sa !== sb) return sa < sb ? -1 : 1;
-    const va = a.job_visit_id ?? '';
-    const vb = b.job_visit_id ?? '';
-    if (va !== vb) return va < vb ? -1 : 1;
-    return 0;
-  });
-}
 
 export default function CrewJobsPage() {
   const router = useRouter();
@@ -75,7 +60,7 @@ export default function CrewJobsPage() {
       console.log('Jobs query result:', { data, error: fetchError });
       
       if (fetchError) throw fetchError;
-      setJobs(sortByRoute((data || []) as JobWithCrew[]));
+      setJobs((data || []) as JobWithCrew[]);
       setError(null);
     } catch (err) {
       console.error('Failed to fetch jobs:', err);
@@ -105,47 +90,40 @@ export default function CrewJobsPage() {
     return () => { cancelled = true; };
   }, [authLoading, isAuthenticated, router, fetchJobs]);
 
-  // Filter jobs based on selected tab
-  const filteredJobs = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
-    console.log('Jobs from database:', jobs);
-    console.log('Today is:', today);
-    console.log('Current filter:', filter);
-    
+  // One card per Job (property visit), in the order the crew should work them. A Job's status
+  // is worked out from its services, and the tabs below filter at the Job level.
+  const visits = useMemo(() => groupByVisit(jobs), [jobs]);
+
+  const filteredVisits = useMemo(() => {
+    const today = todayLocalISO();
+    const open = (status: string) => status !== 'completed' && status !== 'cancelled';
     switch (filter) {
       case 'all':
-        return jobs.filter(job => job.status !== 'cancelled');
+        return visits.filter((v) => v.status !== 'cancelled');
       case 'today':
-        return jobs.filter(job => 
-          job.date === today && job.status !== 'completed' && job.status !== 'cancelled'
-        );
+        return visits.filter((v) => v.date === today && open(v.status));
       case 'upcoming':
-        return jobs.filter(job => 
-          job.date > today && job.status !== 'completed' && job.status !== 'cancelled'
-        );
+        return visits.filter((v) => v.date > today && open(v.status));
       case 'completed':
-        return jobs.filter(job => job.status === 'completed');
+        return visits.filter((v) => v.status === 'completed');
       default:
-        return jobs;
+        return visits;
     }
-  }, [jobs, filter]);
+  }, [visits, filter]);
 
-  // Job counts for badges
+  // Job counts for the badges
   const jobCounts = useMemo(() => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = todayLocalISO();
+    const open = (status: string) => status !== 'completed' && status !== 'cancelled';
     return {
-      all: jobs.filter(job => job.status !== 'cancelled').length,
-      today: jobs.filter(job => 
-        job.date === today && job.status !== 'completed' && job.status !== 'cancelled'
-      ).length,
-      upcoming: jobs.filter(job => 
-        job.date > today && job.status !== 'completed' && job.status !== 'cancelled'
-      ).length,
-      completed: jobs.filter(job => job.status === 'completed').length,
-      in_progress: jobs.filter(job => job.status === 'in_progress').length,
-      scheduled: jobs.filter(job => job.status === 'scheduled').length,
+      all: visits.filter((v) => v.status !== 'cancelled').length,
+      today: visits.filter((v) => v.date === today && open(v.status)).length,
+      upcoming: visits.filter((v) => v.date > today && open(v.status)).length,
+      completed: visits.filter((v) => v.status === 'completed').length,
+      in_progress: visits.filter((v) => v.status === 'in_progress').length,
+      scheduled: visits.filter((v) => v.status === 'scheduled').length,
     };
-  }, [jobs]);
+  }, [visits]);
 
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
@@ -302,7 +280,7 @@ export default function CrewJobsPage() {
         /* Jobs List */
         <div className="px-4 sm:px-6 lg:px-8">
           <div className="max-w-4xl mx-auto space-y-3 sm:grid sm:grid-cols-2 lg:grid-cols-3 sm:gap-4 sm:space-y-0">
-          {filteredJobs.length === 0 ? (
+          {filteredVisits.length === 0 ? (
             <div className="sm:col-span-2 lg:col-span-3">
             <div className="text-center py-12">
               <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -331,8 +309,8 @@ export default function CrewJobsPage() {
             </div>
             </div>
           ) : (
-            filteredJobs.map((job) => (
-              <JobCard key={job.id} job={job} />
+            filteredVisits.map((group) => (
+              <VisitCard key={group.visitId ?? group.jobs[0]?.id} group={group} />
             ))
           )}
           </div>

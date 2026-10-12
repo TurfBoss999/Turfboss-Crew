@@ -6,9 +6,10 @@
 // ================================
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { useRouter, useParams } from 'next/navigation';
 import { useCrewAuth } from '@/contexts/CrewAuthContext';
-import { StatusBadge, BottomActionBar, IssueModal, ImageUploadPreview } from '@/components';
+import { StatusBadge, BottomActionBar, IssueModal, ImageUploadPreview, SiteMapViewer } from '@/components';
 import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
 import { Job, JobWithCrew, JobStatus, IssueType, JobPhoto, PhotoType, SERVICE_TYPE_LABELS } from '@/types/database';
 
@@ -61,7 +62,6 @@ export default function JobDetailPage() {
   // The property's site map, if it has one. Shown near the top; tap to see it full size.
   const [siteMapUrl, setSiteMapUrl] = useState<string | null>(null);
   const [siteMapOpen, setSiteMapOpen] = useState(false);
-  const [siteMapZoomed, setSiteMapZoomed] = useState(false);
   // A visible, dismiss-on-fix message for things that stop an action (e.g. Complete
   // without an after photo), so a blocked tap is never a silent no-op.
   const [notice, setNotice] = useState<string | null>(null);
@@ -426,33 +426,7 @@ export default function JobDetailPage() {
       )}
 
       {/* Site map full size */}
-      {siteMapOpen && siteMapUrl && (
-        <div className="fixed inset-0 z-[60] flex flex-col bg-black" role="dialog" aria-modal="true" aria-label="Site map">
-          <div className="flex items-center justify-between gap-2 bg-black/80 px-4 py-3 text-white">
-            <button
-              type="button"
-              onClick={() => setSiteMapZoomed((z) => !z)}
-              className="rounded-lg bg-white/15 px-4 py-2 text-sm font-medium"
-            >
-              {siteMapZoomed ? 'Fit to screen' : 'Zoom in'}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSiteMapOpen(false)}
-              className="rounded-lg bg-white/15 px-4 py-2 text-sm font-medium"
-            >
-              Close
-            </button>
-          </div>
-          <div className="flex-1 overflow-auto">
-            <img
-              src={siteMapUrl}
-              alt="Site map, full size"
-              className={siteMapZoomed ? 'max-w-none w-[250%]' : 'mx-auto h-full w-full object-contain'}
-            />
-          </div>
-        </div>
-      )}
+      {siteMapOpen && siteMapUrl && <SiteMapViewer url={siteMapUrl} onClose={() => setSiteMapOpen(false)} />}
 
       {/* Header */}
       <div className="bg-white border-b border-gray-200 sticky top-0 z-40">
@@ -468,6 +442,14 @@ export default function JobDetailPage() {
           <div className="flex-1 min-w-0">
             <h1 className="font-semibold text-gray-900 truncate sm:text-lg">{SERVICE_TYPE_LABELS[job.service_type]}</h1>
             <p className="text-sm text-gray-500 truncate sm:text-base">{job.address}</p>
+            {job.job_visit_id && (
+              <Link
+                href={`/crew/visits/${job.job_visit_id}`}
+                className="mt-0.5 inline-block text-sm font-medium text-emerald-600"
+              >
+                &larr; Back to Job
+              </Link>
+            )}
           </div>
         </div>
       </div>
@@ -500,7 +482,7 @@ export default function JobDetailPage() {
             <h3 className="font-medium text-gray-900 mb-3">Site map</h3>
             <button
               type="button"
-              onClick={() => { setSiteMapZoomed(false); setSiteMapOpen(true); }}
+              onClick={() => setSiteMapOpen(true)}
               className="block w-full overflow-hidden rounded-lg border border-gray-200 bg-gray-100"
               aria-label="Open the site map full size"
             >
