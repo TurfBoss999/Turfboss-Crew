@@ -243,11 +243,26 @@ import React, { createContext, useContext, useState, useEffect, ReactNode, useCa
 import type { User, Session, AuthChangeEvent } from '@supabase/supabase-js';
 import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
 import { Profile } from '@/types/database';
+import AccountLoadError from '@/components/AccountLoadError';
 
 const supabase = getSupabaseBrowserClient();
 
 // Profile cache to reduce database calls
 const profileCache = new Map<string, Profile>();
+
+// How long to wait on the account lookup before showing the reload message instead of a spinner
+const ACCOUNT_TIMEOUT_MS = 10_000;
+
+// Resolves to `onTimeout` if `promise` has not settled in time, or if it fails (the promise itself may still be pending).
+function withTimeout<T, F>(promise: Promise<T>, ms: number, onTimeout: F): Promise<T | F> {
+  return new Promise<T | F>((resolve) => {
+    const timer = setTimeout(() => resolve(onTimeout), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      () => { clearTimeout(timer); resolve(onTimeout); }
+    );
+  });
+}
 
 interface CrewInfo {
   id: string;
@@ -279,6 +294,8 @@ export function CrewAuthProvider({ children }: CrewAuthProviderProps) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [crewInfo, setCrewInfo] = useState<CrewInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  // True when the account could not be loaded in time: show "Couldn't load your account" with a Reload button
+  const [loadError, setLoadError] = useState(false);
   
   // Use ref to track initialization across async operations
   const hasInitializedRef = useRef(false);
@@ -344,14 +361,25 @@ export function CrewAuthProvider({ children }: CrewAuthProviderProps) {
         setUser(currentSession.user);
         
         try {
-          const { profile: userProfile, crew } = await fetchProfileAndCrew(currentSession.user.id);
-          
+          const lookup = await withTimeout(fetchProfileAndCrew(currentSession.user.id), ACCOUNT_TIMEOUT_MS, 'failed' as const);
+
           if (!isMountedRef.current) return;
-          
+
+          if (lookup === 'failed') {
+            // Timed out or errored. On first load show the reload message; on a later refresh keep what is on screen.
+            if (!hasInitializedRef.current) setLoadError(true);
+            hasInitializedRef.current = true;
+            setIsLoading(false);
+            return;
+          }
+
+          const { profile: userProfile, crew } = lookup;
+
           // Only set if role is 'crew'
           if (userProfile?.role === 'crew') {
             setProfile(userProfile);
             setCrewInfo(crew);
+            setLoadError(false);
           } else {
             // Not a crew user, clear session
             console.log('[Auth] User is not a crew member, clearing session');
@@ -362,8 +390,7 @@ export function CrewAuthProvider({ children }: CrewAuthProviderProps) {
           }
         } catch (error) {
           console.error('[Auth] Failed to fetch profile:', error);
-          setProfile(null);
-          setCrewInfo(null);
+          if (!hasInitializedRef.current) setLoadError(true);
         }
       } else {
         setSession(null);
@@ -403,7 +430,21 @@ export function CrewAuthProvider({ children }: CrewAuthProviderProps) {
     // Don't wait for onAuthStateChange which can be unreliable on iOS PWA
     (async () => {
       try {
-        const { data: { session: currentSession }, error } = await supabase.auth.getSession();
+        const sessionResult = await withTimeout<{ data: { session: Session | null }; error: unknown }, 'timeout'>(
+          supabase.auth.getSession(),
+          ACCOUNT_TIMEOUT_MS,
+          'timeout'
+        );
+        if (sessionResult === 'timeout') {
+          // The session lookup itself is stuck: show the reload message rather than a spinner
+          if (isMountedRef.current && !hasInitializedRef.current) {
+            hasInitializedRef.current = true;
+            setLoadError(true);
+            setIsLoading(false);
+          }
+          return;
+        }
+        const { data: { session: currentSession }, error } = sessionResult;
         
         if (error) {
           console.error('[Auth] getSession error:', error);
@@ -418,19 +459,22 @@ export function CrewAuthProvider({ children }: CrewAuthProviderProps) {
         // Ensure loading is set to false even on error
         if (isMountedRef.current && !hasInitializedRef.current) {
           hasInitializedRef.current = true;
+          setLoadError(true);
           setIsLoading(false);
         }
       }
     })();
 
-    // Safety timeout - ensure loading state resolves even if everything fails
+    // Safety timeout - ensure loading state resolves even if everything fails. A stalled load shows the
+    // reload message; it must not pass as "signed out" (that would bounce a signed-in person to the login page).
     const timeoutId = setTimeout(() => {
       if (isMountedRef.current && !hasInitializedRef.current) {
-        console.warn('[Auth] Initialization timeout - forcing loading to false');
+        console.warn('[Auth] Initialization timeout - showing the reload message');
         hasInitializedRef.current = true;
+        setLoadError(true);
         setIsLoading(false);
       }
-    }, 5000); // 5 second timeout
+    }, ACCOUNT_TIMEOUT_MS + 1000);
 
     return () => {
       isMountedRef.current = false;
@@ -455,7 +499,12 @@ export function CrewAuthProvider({ children }: CrewAuthProviderProps) {
       }
 
       // Fetch profile to verify role
-      const { profile: userProfile, crew } = await fetchProfileAndCrew(data.user.id);
+      const lookup = await withTimeout(fetchProfileAndCrew(data.user.id), ACCOUNT_TIMEOUT_MS, 'failed' as const);
+      if (lookup === 'failed') {
+        await supabase.auth.signOut({ scope: 'local' });
+        return { success: false, error: "Couldn't load your account. Please try again." };
+      }
+      const { profile: userProfile, crew } = lookup;
 
       if (!userProfile) {
         await supabase.auth.signOut();
@@ -493,6 +542,10 @@ export function CrewAuthProvider({ children }: CrewAuthProviderProps) {
   };
 
   const isAuthenticated = !!user && !!profile && profile.role === 'crew';
+
+  if (loadError) {
+    return <AccountLoadError />;
+  }
 
   return (
     <CrewAuthContext.Provider value={{ 
