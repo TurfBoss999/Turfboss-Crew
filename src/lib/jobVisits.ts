@@ -34,6 +34,8 @@ export interface VisitGroup {
   date: string;
   address: string;
   routeOrder: number | null;
+  // Estimated drive minutes from the previous stop (stop 1: from the start), when the office saved them
+  legMinutes: number | null;
   // Services still on the Job (cancelled ones are left out), in a fixed order
   jobs: JobWithCrew[];
   status: JobStatus;
@@ -65,6 +67,7 @@ export function groupByVisit(subJobs: JobWithCrew[]): VisitGroup[] {
       date: first.date,
       address: first.address,
       routeOrder: first.job_visit?.route_order ?? null,
+      legMinutes: first.job_visit?.route_leg_minutes ?? null,
       jobs: live,
       // the status of the whole Job counts cancelled services too (a Job whose services are all cancelled is cancelled)
       status: visitStatus(all),
@@ -84,6 +87,20 @@ export function groupByVisit(subJobs: JobWithCrew[]): VisitGroup[] {
     if (ka !== kb) return ka < kb ? -1 : 1;
     return 0;
   });
+}
+
+// The Job's fields to read along with each Sub Job, newest first. If the database does not have a newer
+// column yet, the next shorter list is tried, so a missing column costs that field only, never the stop number.
+export const JOB_VISIT_EMBEDS: (string | null)[] = [
+  'job_visit:job_visits(route_order, route_leg_minutes)',
+  'job_visit:job_visits(route_order)',
+  null,
+];
+
+// "About 8 min from the previous stop" for the card, or null when the office saved no minutes
+export function legMinutesText(group: Pick<VisitGroup, 'routeOrder' | 'legMinutes'>): string | null {
+  if (group.routeOrder == null || group.legMinutes == null) return null;
+  return `About ${group.legMinutes} min from ${group.routeOrder === 1 ? 'the start' : 'the previous stop'}`;
 }
 
 // What to show next to one service: its state and who has it

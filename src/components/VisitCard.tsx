@@ -7,7 +7,7 @@
 import Link from 'next/link';
 import { SERVICE_TYPE_LABELS } from '@/types/database';
 import { StatusBadge } from './StatusBadge';
-import { serviceStateText, VisitGroup } from '@/lib/jobVisits';
+import { legMinutesText, serviceStateText, VisitGroup } from '@/lib/jobVisits';
 
 function formatTime(time: string): string {
   const [hours, minutes] = time.split(':');
@@ -58,6 +58,11 @@ export function VisitCard({ group }: { group: VisitGroup }) {
           {formatDate(group.date)}
           {windowText && <> &middot; {windowText}</>}
         </p>
+        {legMinutesText(group) && (
+          <p className="text-gray-500 text-sm mt-0.5" data-testid="leg-minutes">
+            {legMinutesText(group)}
+          </p>
+        )}
 
         <ul className="mt-3 space-y-1.5 border-t border-gray-100 pt-3">
           {group.jobs.map((job) => (

@@ -13,7 +13,7 @@ import { useCrewAuth } from '@/contexts/CrewAuthContext';
 import { StatusBadge, SiteMapViewer } from '@/components';
 import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
 import { JobWithCrew, SERVICE_TYPE_LABELS } from '@/types/database';
-import { groupByVisit, serviceStateText } from '@/lib/jobVisits';
+import { groupByVisit, JOB_VISIT_EMBEDS, legMinutesText, serviceStateText } from '@/lib/jobVisits';
 
 const supabase = getSupabaseBrowserClient();
 
@@ -51,10 +51,19 @@ export default function VisitPage() {
     try {
       // Row-level security limits this to Jobs the crew is on (through job_visit_crews), so a Job
       // that is not theirs simply comes back empty.
-      const { data, error } = await supabase
-        .from('jobs')
-        .select('*, crew:crews(*), job_visit:job_visits(route_order)')
-        .eq('job_visit_id', visitId);
+      // If a newer column is not in the database yet, try the shorter list of fields (never lose the stop number).
+      let data: unknown[] | null = null;
+      let error: { code?: string } | null = null;
+      for (const embed of JOB_VISIT_EMBEDS) {
+        const res = await supabase
+          .from('jobs')
+          .select(embed ? `*, crew:crews(*), ${embed}` : '*, crew:crews(*)')
+          .eq('job_visit_id', visitId);
+        data = res.data;
+        error = res.error;
+        // 22P02 is an invalid id in the address: no shorter list will fix that
+        if (!error || error.code === '22P02') break;
+      }
 
       if (error) {
         // 22P02: the id in the address is not even a valid id
@@ -198,6 +207,11 @@ export default function VisitPage() {
               {group.doneCount} of {group.totalCount} done
             </span>
             {windowText && <span className="text-sm text-gray-500">&middot; {windowText}</span>}
+            {legMinutesText(group) && (
+              <span className="text-sm text-gray-500" data-testid="leg-minutes">
+                &middot; {legMinutesText(group)}
+              </span>
+            )}
           </div>
 
           {siteMapUrl && (

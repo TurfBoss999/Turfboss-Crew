@@ -9,7 +9,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useCrewAuth } from '@/contexts/CrewAuthContext';
 import { VisitCard } from '@/components';
-import { groupByVisit, todayLocalISO } from '@/lib/jobVisits';
+import { groupByVisit, JOB_VISIT_EMBEDS, todayLocalISO } from '@/lib/jobVisits';
 import { getSupabaseBrowserClient } from '@/lib/supabaseBrowser';
 import { JobWithCrew } from '@/types/database';
 
@@ -37,24 +37,21 @@ export default function CrewJobsPage() {
     try {
       // No crew_id filter: a crew sees every Sub Job of the Jobs it is assigned to, and
       // row-level security (via job_visit_crews) is what limits that. The Job's stop number
-      // (route_order) comes along so the list can follow the planned route.
-      let { data, error: fetchError } = await supabase
-        .from('jobs')
-        .select('*, crew:crews(*), job_visit:job_visits(route_order)')
-        .order('date', { ascending: true })
-        .order('job_visit_id', { ascending: true });
-
-      if (fetchError) {
-        // The stop-number column may not exist yet (the database script has not been run).
-        // Fall back to the plain list rather than showing a crew nothing at all.
-        console.warn('Stop numbers unavailable, loading jobs without them:', fetchError.message);
-        const plain = await supabase
+      // (route_order) and the estimated minutes to it come along so the list can follow the planned route.
+      // If a column does not exist yet (a database script has not been run), try the shorter list of
+      // fields rather than showing a crew nothing at all, and keep the stop number whenever it exists.
+      let data: unknown[] | null = null;
+      let fetchError: { message: string } | null = null;
+      for (const embed of JOB_VISIT_EMBEDS) {
+        const res = await supabase
           .from('jobs')
-          .select('*, crew:crews(*)')
+          .select(embed ? `*, crew:crews(*), ${embed}` : '*, crew:crews(*)')
           .order('date', { ascending: true })
           .order('job_visit_id', { ascending: true });
-        data = plain.data;
-        fetchError = plain.error;
+        data = res.data;
+        fetchError = res.error;
+        if (!fetchError) break;
+        console.warn('Some route details unavailable, trying fewer fields:', fetchError.message);
       }
 
       console.log('Jobs query result:', { data, error: fetchError });
@@ -89,6 +86,17 @@ export default function CrewJobsPage() {
     loadJobs();
     return () => { cancelled = true; };
   }, [authLoading, isAuthenticated, router, fetchJobs]);
+
+  // The app can stay open on a phone for hours. When the crew comes back to it, look again, so a route the
+  // office planned (stop numbers and minutes) or a Job another crew started shows up without pressing Refresh.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    function onVisible() {
+      if (document.visibilityState === 'visible') fetchJobs();
+    }
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [fetchJobs, isAuthenticated]);
 
   // One card per Job (property visit), in the order the crew should work them. A Job's status
   // is worked out from its services, and the tabs below filter at the Job level.
